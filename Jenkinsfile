@@ -1,49 +1,51 @@
+
 pipeline {
     agent any
 
-    tools {
-        jdk 'jdk17'
-        maven 'maven3'
-    }
-
     stages {
-        stage('Checkout') {
+        stage('Build and Test') {
             steps {
-                git 'https://github.com/Ayushkhodankar/spring-boot-ci-cd-demo.git'
+                sh 'mvn -B clean verify'
             }
         }
 
-        stage('Build') {
+        stage('Build Docker Image') {
             steps {
-                sh 'mvn clean install'
+                sh 'docker build -t spring-boot-ci-cd-demo .'
             }
         }
 
-        stage('Test') {
+        stage('Deploy Container') {
             steps {
-                sh 'mvn test'
+                sh '''
+                    docker rm -f spring-boot-ci-cd-demo || true
+
+                    docker run -d \
+                      --restart unless-stopped \
+                      --name spring-boot-ci-cd-demo \
+                      -p 8081:8080 \
+                      spring-boot-ci-cd-demo
+                '''
             }
         }
 
-        stage('Package') {
+        stage('Verify Deployment') {
             steps {
-                sh 'mvn package'
-            }
-        }
+                sh '''
+                    for i in $(seq 1 20); do
+                        if curl -fsS http://localhost:8081/api/hello; then
+                            echo "Application is running successfully!"
+                            exit 0
+                        fi
+                        sleep 3
+                    done
 
-        stage('Deploy') {
-            steps {
-                echo 'Deploying application...'
+                    echo "Application did not respond in time."
+                    docker logs spring-boot-ci-cd-demo
+                    exit 1
+                '''
             }
-        }
-    }
-
-    post {
-        success {
-            echo 'Build and Deployment Successful!'
-        }
-        failure {
-            echo 'Build failed.'
         }
     }
 }
+
